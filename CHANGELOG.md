@@ -9,9 +9,9 @@
 
 ### Fixed
 
-* `--upstream` now validates the form at startup: anything that is not an `http://` or `https://` URL exits with status 2 and an argparse-style error, instead of starting normally and failing the first call as `upstream.unreachable` (#105).
-### Fixed
-
+* `--upstream` is validated at startup: a value that is not an `http://` or `https://` URL with a
+  host exits with status 2 and an argparse error instead of starting normally and failing every
+  call as `upstream.unreachable` (#105).
 * A failed `SIGHUP` policy reload was reported twice on stderr. It is now one `mcp-airlock: `
   prefixed line from a single stderr handler, and other `mcp_airlock` warnings gain the prefix.
 * The documented worst case of a `where` regex at the 4096-character cap is about 0.13 s for ASCII
@@ -217,4 +217,3 @@
 ## 0.1.0 - 2026-09-14
 
 * First release: allowlist, forced dry run, human confirmation, blast radius, audit, tracing.
-

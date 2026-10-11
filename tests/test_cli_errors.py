@@ -93,7 +93,7 @@ def test_port_type_rejects_out_of_range_and_non_integers(text):
     assert cli._port("0") == 0 and cli._port("65535") == 65535
 
 
-@pytest.mark.parametrize("bad", ["not-a-url", "ftp://x/mcp", "http://", "//no-scheme"])
+@pytest.mark.parametrize("bad", ["not-a-url", "ftp://x/mcp", "http://", "//no-scheme", "http://[::1", "https:///path", "http://:8080/mcp"])
 def test_upstream_type_rejects_non_http_urls(bad):
     with pytest.raises(argparse.ArgumentTypeError):
         cli._upstream(bad)
@@ -213,4 +213,3 @@ def test_configure_logging_keeps_tracebacks_behind_the_prefix():
         logging.getLogger("mcp_airlock").exception("airlock internal error")
     out = buf.getvalue()
     assert out.startswith("mcp-airlock: airlock internal error\n") and "Traceback" in out and "ValueError: boom" in out, out
-

@@ -7,8 +7,8 @@ import logging
 import os
 import sys
 from collections.abc import Callable
-from urllib.parse import urlsplit
 from typing import TextIO
+from urllib.parse import urlsplit
 
 import uvicorn
 import yaml
@@ -97,9 +97,7 @@ def _port(text: str) -> int:
 
 
 def _upstream(text: str) -> str:
-    # Reject a mistyped --upstream at startup instead of starting normally and
-    # failing the first call with "upstream unreachable". Only the form is
-    # checked; an unreachable host stays a runtime upstream.unreachable.
+    # only the form; an unreachable host stays a runtime upstream.unreachable
     try:
         parts = urlsplit(text)
     except ValueError:
@@ -171,4 +169,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
