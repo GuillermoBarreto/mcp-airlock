@@ -708,6 +708,7 @@ class Airlock:
             reply = _last_sse_message(raw.decode("utf-8", errors="replace"), body["id"])
             if reply is None:
                 raise UpstreamFailed("upstream.bad_reply", "upstream SSE stream ended without a response", sent=True, status=r.status_code)
+            _refuse_deep_reply(reply, r.status_code)
             return r.status_code, reply
         try:
             # The same strictness as for the request: NaN (what Python's json.dumps emits for float('nan')) or a reply
@@ -718,6 +719,7 @@ class Airlock:
                                  sent=True, status=r.status_code) from None
         if not isinstance(reply, dict):
             raise UpstreamFailed("upstream.bad_reply", "upstream returned a non-object", sent=True, status=r.status_code)
+        _refuse_deep_reply(reply, r.status_code)
         return r.status_code, reply
 
     def _filter_tools(self, result: dict[str, Any], who: Principal, policy: Policy) -> None:
@@ -986,6 +988,13 @@ def _last_sse_message(text: str, rid: Any) -> dict[str, Any] | None:
     return found
 
 
+def _refuse_deep_reply(reply: dict[str, Any], status: int | None) -> None:
+    """Replies get the same 64-level nesting limit as requests (README, 0.4.0 CHANGELOG)."""
+    if _depth(reply) > MAX_DEPTH:
+        raise UpstreamFailed("upstream.bad_reply", f"upstream reply nested deeper than {MAX_DEPTH} levels",
+                             sent=True, status=status)
+
+
 def _upstream_meta(result: dict[str, Any]) -> dict[str, Any]:
     """An upstream result's `_meta` without the proxy's namespace. Those keys are the proxy's word to the client: a
     server could otherwise claim `status: approved`, an empty `suspicious` list or another principal."""
@@ -1049,12 +1058,20 @@ def _finite_float(text: str) -> float:
 
 def _depth(value: Any) -> int:
     """Nesting depth of a decoded body, without recursion (the body may be deeper than the Python stack allows)."""
-    deepest, stack = 0, [(value, 0)]
-    while stack:
-        v, d = stack.pop()
-        if isinstance(v, (dict, list)):
-            deepest = max(deepest, d + 1)
-            stack.extend((c, d + 1) for c in (v.values() if isinstance(v, dict) else v))
+    deepest, level = 0, [value]
+    while level:
+        nxt: list[Any] = []
+        seen = False  # any container on this level
+        for v in level:
+            if type(v) is dict:
+                seen = True
+                nxt.extend(v.values())
+            elif type(v) is list:
+                seen = True
+                nxt.extend(v)
+        if not seen:
+            break
+        deepest, level = deepest + 1, nxt
     return deepest
 
 
