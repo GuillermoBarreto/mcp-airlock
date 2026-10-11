@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import os
 import sys
 from collections.abc import Callable
+from typing import TextIO
 
 import uvicorn
 import yaml
@@ -93,6 +95,15 @@ def _port(text: str) -> int:
     return n
 
 
+def configure_logging(stream: TextIO | None = None) -> None:
+    """Every mcp_airlock log record is one prefixed stderr line (a traceback follows its record)."""
+    handler = logging.StreamHandler(stream or sys.stderr)
+    handler.setFormatter(logging.Formatter("mcp-airlock: %(message)s"))
+    log = logging.getLogger("mcp_airlock")
+    log.handlers[:] = [handler]  # main() runs several times in one process in the tests
+    log.setLevel(logging.INFO)
+
+
 def _fail(e: BaseException, message: str | None = None) -> SystemExit:
     """Bad input is one line on stderr and exit 1; AIRLOCK_DEBUG=1 keeps the traceback to see where it came from."""
     if os.environ.get("AIRLOCK_DEBUG") == "1":  # exactly 1, as documented: "0" or "false" must not mean debug
@@ -101,6 +112,7 @@ def _fail(e: BaseException, message: str | None = None) -> SystemExit:
 
 
 def main() -> None:
+    configure_logging()
     ap = argparse.ArgumentParser(prog="mcp-airlock")
     ap.add_argument("--policy", required=True)
     ap.add_argument("--upstream", required=True, help="upstream MCP endpoint, e.g. http://127.0.0.1:9001/mcp")
