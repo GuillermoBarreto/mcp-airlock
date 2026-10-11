@@ -4,11 +4,19 @@
 
 ### Changed
 
+* `docs/clients.md` shows how the Python SDK passes identity and records the TypeScript SDK
+  client 2.3.1 (pinned to 2026-07-28) (#103).
 * The Docker images are built with a pinned uv 0.12.24, so the build no longer downloads an
   unlocked `uv_build` from PyPI.
 
 ### Fixed
 
+* The quick-start examples set `AIRLOCK_TRUST_PRINCIPAL_HEADER=1` (without identity every call was
+  401); the README states the raw HTTP/JSON-RPC answers and that the confirmation hash leaves out
+  `dry_run` (#101).
+* An upstream reply nested deeper than 64 levels was forwarded and audited as `allow`, although the
+  README promised `upstream.bad_reply`. It is now refused as `upstream.bad_reply` on both the JSON
+  and the SSE path, before anything recurses over it.
 * `--upstream` is validated at startup: a value that is not an `http://` or `https://` URL with a
   host exits with status 2 and an argparse error instead of starting normally and failing every
   call as `upstream.unreachable` (#105).
@@ -16,6 +24,11 @@
   prefixed line from a single stderr handler, and other `mcp_airlock` warnings gain the prefix.
 * The documented worst case of a `where` regex at the 4096-character cap is about 0.13 s for ASCII
   and about 0.3 s for 4-byte characters (RE2 costs per byte); the cap itself is unchanged.
+* The approval post and the approve page no longer carry the client-facing "confirming in the
+  client does not approve" sentence; the elicitation text keeps it.
+* `AIRLOCK_TRUST_PRINCIPAL_HEADER` set to anything but `0` or `1` (`true`, `yes`) now prints a
+  startup warning naming the value; only `1` enables the header, and `--strict` stops the start.
+* `airlock-audit verify` says `1 file` and `1 record`, not `1 files`.
 
 ## 0.4.0 - 2026-10-10
 

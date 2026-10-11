@@ -57,6 +57,8 @@ CONFIRM_KEY = "airlock-confirm"
 ERROR_TEXT_MAX = 300  # chars of upstream or exception text kept in a caller message or audit detail
 NAME_MAX = 128  # chars of a client-chosen method or tool name kept in a pre-auth audit record
 AUDIT_CLOSE_S = 15.0  # the audit sink needs about the connect timeout plus 2 s to give up on a frozen database
+OOB_NOTE = ("Approval happens through the link sent to the approval channel; confirming in the client does not approve, "
+            "and declining cancels the request.")
 PROMPT_TEXT_MAX = 8000  # chars of the prompt kept for the approve page
 # The message is cut shorter still (approvals.TEXT_MAX), so the rest is not there:
 # the audit intent record has it.
@@ -706,6 +708,7 @@ class Airlock:
             reply = _last_sse_message(raw.decode("utf-8", errors="replace"), body["id"])
             if reply is None:
                 raise UpstreamFailed("upstream.bad_reply", "upstream SSE stream ended without a response", sent=True, status=r.status_code)
+            _refuse_deep_reply(reply, r.status_code)
             return r.status_code, reply
         try:
             # The same strictness as for the request: NaN (what Python's json.dumps emits for float('nan')) or a reply
@@ -716,6 +719,7 @@ class Airlock:
                                  sent=True, status=r.status_code) from None
         if not isinstance(reply, dict):
             raise UpstreamFailed("upstream.bad_reply", "upstream returned a non-object", sent=True, status=r.status_code)
+        _refuse_deep_reply(reply, r.status_code)
         return r.status_code, reply
 
     def _filter_tools(self, result: dict[str, Any], who: Principal, policy: Policy) -> None:
@@ -805,8 +809,7 @@ class Airlock:
                               for b in (raw if isinstance(raw, list) else [])]
             text = " ".join(b["text"] for b in preview_blocks if isinstance(b, dict) and isinstance(b.get("text"), str))[:2000]
             preview_line = f"Dry-run preview: {text or '(empty)'}"
-        ask = ("Approval happens through the link sent to the approval channel; confirming in the client does not approve, "
-               "and declining cancels the request." if self.approval_mode == "oob" else "Confirm to execute for real.")
+        ask = OOB_NOTE if self.approval_mode == "oob" else "Confirm to execute for real."
         # U+FFFD for a lone surrogate, as the audit does: this text is posted as UTF-8 to the webhook and saved for the page
         message = wellformed(f"[{env}] {tool}: {rule.description or 'write operation'} (tier L2).\n"
                              f"Arguments: {json.dumps(shown, ensure_ascii=False, default=str)}\n{preview_line}\n"
@@ -829,7 +832,9 @@ class Airlock:
         if not self.webhook:
             return
         message = result["inputRequests"][CONFIRM_KEY]["params"]["message"]
-        stored = message.replace("\x00", "")  # Postgres text cannot hold NUL
+        head, sep, tail = message.rpartition(OOB_NOTE + " ")  # the last one: the note sits just before the key, arguments may hold it
+        human_text = head + tail if sep else message
+        stored = human_text.replace("\x00", "")  # Postgres text cannot hold NUL
         if len(stored) > PROMPT_TEXT_MAX:  # say so on the page: the cut can hide the target argument and the preview
             stored = stored[:PROMPT_TEXT_MAX - len(PROMPT_CUT_NOTE)] + PROMPT_CUT_NOTE
         try:  # the approve page shows this text; a failed save only leaves the page without it
@@ -837,7 +842,7 @@ class Airlock:
             await self.engine.store.save_prompt(claims["k"], stored, claims["exp"])
         except Exception as e:
             log.warning("saving the approval prompt text failed: %s", type(e).__name__)
-        text = wellformed(f"mcp-airlock approval request from {principal}\n") + message
+        text = wellformed(f"mcp-airlock approval request from {principal}\n") + human_text
         await approvals.notify(text, self.approve_link(result["requestState"]), webhook=self.webhook,
                                http=self.notify_http, telegram_chat=self.telegram_chat)
 
@@ -983,6 +988,13 @@ def _last_sse_message(text: str, rid: Any) -> dict[str, Any] | None:
     return found
 
 
+def _refuse_deep_reply(reply: dict[str, Any], status: int | None) -> None:
+    """Replies get the same 64-level nesting limit as requests (README, 0.4.0 CHANGELOG)."""
+    if _depth(reply) > MAX_DEPTH:
+        raise UpstreamFailed("upstream.bad_reply", f"upstream reply nested deeper than {MAX_DEPTH} levels",
+                             sent=True, status=status)
+
+
 def _upstream_meta(result: dict[str, Any]) -> dict[str, Any]:
     """An upstream result's `_meta` without the proxy's namespace. Those keys are the proxy's word to the client: a
     server could otherwise claim `status: approved`, an empty `suspicious` list or another principal."""
@@ -1046,12 +1058,20 @@ def _finite_float(text: str) -> float:
 
 def _depth(value: Any) -> int:
     """Nesting depth of a decoded body, without recursion (the body may be deeper than the Python stack allows)."""
-    deepest, stack = 0, [(value, 0)]
-    while stack:
-        v, d = stack.pop()
-        if isinstance(v, (dict, list)):
-            deepest = max(deepest, d + 1)
-            stack.extend((c, d + 1) for c in (v.values() if isinstance(v, dict) else v))
+    deepest, level = 0, [value]
+    while level:
+        nxt: list[Any] = []
+        seen = False  # any container on this level
+        for v in level:
+            if type(v) is dict:
+                seen = True
+                nxt.extend(v.values())
+            elif type(v) is list:
+                seen = True
+                nxt.extend(v)
+        if not seen:
+            break
+        deepest, level = deepest + 1, nxt
     return deepest
 
 
